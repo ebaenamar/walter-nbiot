@@ -46,7 +46,7 @@ static bool wait_for_network_registration(uint32_t timeout_ms)
     ESP_LOGI(TAG, "Waiting for network registration");
     
     uint32_t elapsed = 0;
-    WalterModemNetworkRegState regState;
+    WalterModemNetworkRegState regState = WALTER_MODEM_NETWORK_REG_NOT_SEARCHING;
     
     while (elapsed < timeout_ms) {
         regState = WalterModem::getNetworkRegState();
@@ -61,7 +61,7 @@ static bool wait_for_network_registration(uint32_t timeout_ms)
         elapsed += CHECK_INTERVAL_MS;
     }
     
-    ESP_LOGE(TAG, "Network registration timeout (state: %d)", regState);
+    ESP_LOGE(TAG, "Network registration timeout (state: %d)", (int)regState);
     return false;
 }
 
@@ -121,14 +121,22 @@ static bool connect_nbiot(void)
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
-    // Step 4: Set operational state to FULL
-    ESP_LOGI(TAG, "[4/10] Setting operational state to FULL...");
-    if (!WalterModem::setOpState(WALTER_MODEM_OPSTATE_FULL)) {
-        ESP_LOGE(TAG, "Failed to set operational state");
+    // Step 3.5: Check current RAT
+    ESP_LOGI(TAG, "[3.5/10] Checking current RAT...");
+    rsp = {};
+    if (WalterModem::getRAT(&rsp)) {
+        ESP_LOGI(TAG, "Current RAT: %d", rsp.data.rat);
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // Step 4: Set operational state to MINIMUM (required before changing RAT)
+    ESP_LOGI(TAG, "[4/10] Setting operational state to MINIMUM...");
+    if (!WalterModem::setOpState(WALTER_MODEM_OPSTATE_MINIMUM)) {
+        ESP_LOGE(TAG, "Failed to set operational state to MINIMUM");
         return false;
     }
-    ESP_LOGI(TAG, "OK: Operational state set");
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGI(TAG, "OK: Operational state set to MINIMUM");
+    vTaskDelay(pdMS_TO_TICKS(2000));
     
     // Step 5: Configure RAT to NB-IoT
     ESP_LOGI(TAG, "[5/10] Configuring RAT to NB-IoT...");
@@ -137,13 +145,23 @@ static bool connect_nbiot(void)
         ESP_LOGI(TAG, "Trying LTE-M as fallback...");
         if (!WalterModem::setRAT(WALTER_MODEM_RAT_LTEM)) {
             ESP_LOGE(TAG, "Failed to set RAT to LTE-M");
-            return false;
+            ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
+        } else {
+            ESP_LOGI(TAG, "OK: RAT set to LTE-M");
         }
-        ESP_LOGI(TAG, "OK: RAT set to LTE-M");
     } else {
         ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
+    // Step 5.5: Set operational state back to FULL
+    ESP_LOGI(TAG, "[5.5/10] Setting operational state to FULL...");
+    if (!WalterModem::setOpState(WALTER_MODEM_OPSTATE_FULL)) {
+        ESP_LOGE(TAG, "Failed to set operational state to FULL");
+        return false;
+    }
+    ESP_LOGI(TAG, "OK: Operational state set to FULL");
+    vTaskDelay(pdMS_TO_TICKS(2000));
     
     // Step 6: Unlock SIM card
     ESP_LOGI(TAG, "[6/10] Unlocking SIM card...");
