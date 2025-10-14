@@ -16,9 +16,13 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <WalterModem.h>
+#include "debug_commands.h"
 
 // Logging tag
 static const char *TAG = "walter_nbiot";
+
+// Enable debug mode (set to false to disable verbose debugging)
+#define DEBUG_MODE true
 
 // Network configuration - Soracom
 #define CELLULAR_APN "soracom.io"          // Soracom APN
@@ -113,6 +117,12 @@ static bool connect_nbiot(void)
     ESP_LOGI(TAG, "OK: Communication established");
     vTaskDelay(pdMS_TO_TICKS(500));
     
+    // Run full diagnostics if debug mode is enabled
+    if (DEBUG_MODE) {
+        run_modem_diagnostics();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    
     // Step 3: Get modem identity
     ESP_LOGI(TAG, "[3/10] Getting modem identity...");
     rsp = {};
@@ -121,11 +131,29 @@ static bool connect_nbiot(void)
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
-    // Step 3.5: Check current RAT
-    ESP_LOGI(TAG, "[3.5/10] Checking current RAT...");
+    // Step 3.5: Check current operational state
+    ESP_LOGI(TAG, "[3.5/10] Checking current operational state...");
+    rsp = {};
+    if (WalterModem::getOpState(&rsp)) {
+        ESP_LOGI(TAG, "Current operational state: %d", rsp.data.opState);
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // Step 3.6: Check current RAT
+    ESP_LOGI(TAG, "[3.6/10] Checking current RAT...");
     rsp = {};
     if (WalterModem::getRAT(&rsp)) {
-        ESP_LOGI(TAG, "Current RAT: %d", rsp.data.rat);
+        ESP_LOGI(TAG, "Current RAT: %d (0=CAT-M1, 1=NB-IoT, 2=GSM)", rsp.data.rat);
+    } else {
+        ESP_LOGW(TAG, "Could not get current RAT");
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // Step 3.7: Check radio bands
+    ESP_LOGI(TAG, "[3.7/10] Checking radio bands...");
+    rsp = {};
+    if (WalterModem::getRadioBands(&rsp)) {
+        ESP_LOGI(TAG, "Radio bands configured");
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
@@ -140,17 +168,49 @@ static bool connect_nbiot(void)
     
     // Step 5: Configure RAT to NB-IoT
     ESP_LOGI(TAG, "[5/10] Configuring RAT to NB-IoT...");
-    if (!WalterModem::setRAT(WALTER_MODEM_RAT_NBIOT)) {
-        ESP_LOGE(TAG, "Failed to set RAT to NB-IoT");
-        ESP_LOGI(TAG, "Trying LTE-M as fallback...");
-        if (!WalterModem::setRAT(WALTER_MODEM_RAT_LTEM)) {
-            ESP_LOGE(TAG, "Failed to set RAT to LTE-M");
-            ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
+    
+    if (DEBUG_MODE) {
+        check_rat_support();
+    }
+    
+    // Use debug function for detailed RAT setting
+    if (DEBUG_MODE) {
+        if (!debug_set_rat(WALTER_MODEM_RAT_NBIOT)) {
+            ESP_LOGE(TAG, "Failed to set RAT to NB-IoT");
+            ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
+            if (!debug_set_rat(WALTER_MODEM_RAT_LTEM)) {
+                ESP_LOGE(TAG, "Failed to set RAT to LTE-M");
+                ESP_LOGW(TAG, "Continuing with current RAT setting");
+            } else {
+                ESP_LOGI(TAG, "OK: RAT set to LTE-M");
+            }
         } else {
-            ESP_LOGI(TAG, "OK: RAT set to LTE-M");
+            ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
         }
     } else {
-        ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
+        // Normal mode (less verbose)
+        rsp = {};
+        if (!WalterModem::setRAT(WALTER_MODEM_RAT_NBIOT, &rsp)) {
+            ESP_LOGE(TAG, "Failed to set RAT to NB-IoT (error code: %d)", rsp.result);
+            
+            ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
+            rsp = {};
+            if (!WalterModem::setRAT(WALTER_MODEM_RAT_LTEM, &rsp)) {
+                ESP_LOGE(TAG, "Failed to set RAT to LTE-M (error code: %d)", rsp.result);
+                ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
+            } else {
+                ESP_LOGI(TAG, "OK: RAT set to LTE-M");
+            }
+        } else {
+            ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
+        }
+    }
+    
+    // Verify final RAT setting
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    rsp = {};
+    if (WalterModem::getRAT(&rsp)) {
+        ESP_LOGI(TAG, "Final RAT configuration: %d", rsp.data.rat);
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     
@@ -192,12 +252,53 @@ static bool connect_nbiot(void)
     
     // Step 8: Wait for network registration
     ESP_LOGI(TAG, "[8/10] Waiting for network registration...");
+    
+    if (DEBUG_MODE) {
+        check_network_coverage();
+    }
+    
     if (!wait_for_network_registration(NETWORK_TIMEOUT_MS)) {
+        // Get diagnostic info before failing
+        ESP_LOGE(TAG, "Network registration failed - gathering diagnostic info:");
+        
+        if (DEBUG_MODE) {
+            check_network_coverage();
+            check_rat_support();
+        }
+        
+        rsp = {};
+        if (WalterModem::getRAT(&rsp)) {
+            ESP_LOGE(TAG, "  Current RAT: %d", rsp.data.rat);
+        }
+        
+        rsp = {};
+        if (WalterModem::getSIMState(&rsp)) {
+            ESP_LOGE(TAG, "  SIM state: %d", rsp.data.simState);
+        }
+        
+        get_signal_info();
+        
+        ESP_LOGE(TAG, "");
+        ESP_LOGE(TAG, "TROUBLESHOOTING TIPS:");
+        ESP_LOGE(TAG, "1. Check antenna connection");
+        ESP_LOGE(TAG, "2. Verify NB-IoT/LTE-M coverage in your area");
+        ESP_LOGE(TAG, "3. Confirm SIM card is activated in Soracom console");
+        ESP_LOGE(TAG, "4. Check if SIM supports NB-IoT or LTE-M");
+        ESP_LOGE(TAG, "5. Try moving to a location with better signal");
+        
         return false;
     }
     
     // Get signal quality
     get_signal_info();
+    
+    // Get cell information
+    ESP_LOGI(TAG, "Getting cell information...");
+    rsp = {};
+    if (WalterModem::getCellInformation(&rsp)) {
+        ESP_LOGI(TAG, "Connected to network");
+    }
+    
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Step 9: Define PDP context
