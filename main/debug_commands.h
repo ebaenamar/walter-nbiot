@@ -9,6 +9,8 @@
 #define DEBUG_COMMANDS_H
 
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <WalterModem.h>
 
 static const char *DEBUG_TAG = "walter_debug";
@@ -17,6 +19,11 @@ static const char *DEBUG_TAG = "walter_debug";
  * Send a raw AT command and log the response
  */
 static void send_debug_command(const char* cmd, const char* description) {
+    if (cmd == NULL || description == NULL) {
+        ESP_LOGE(DEBUG_TAG, "Invalid parameters to send_debug_command");
+        return;
+    }
+    
     ESP_LOGI(DEBUG_TAG, "Sending: %s (%s)", cmd, description);
     WalterModemRsp rsp = {};
     if (WalterModem::sendCmd(cmd, NULL, &rsp)) {

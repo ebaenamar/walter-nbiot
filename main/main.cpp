@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <string.h>
 #include <WalterModem.h>
 #include "debug_commands.h"
 
@@ -312,7 +313,7 @@ static bool connect_nbiot(void)
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Step 9.5: Set authentication parameters if needed
-    if (CELLULAR_APN_USER != NULL && strlen(CELLULAR_APN_USER) > 0) {
+    if (strlen(CELLULAR_APN_USER) > 0) {
         ESP_LOGI(TAG, "[9.5/10] Setting PDP authentication...");
         if (!WalterModem::setPDPAuthParams(
                 WALTER_MODEM_PDP_AUTH_PROTO_PAP, 
@@ -351,14 +352,14 @@ static bool connect_nbiot(void)
     if (WalterModem::getPDPAddress(&rsp)) {
         ESP_LOGI(TAG, "PDP Context ID: %d", rsp.data.pdpAddressList.pdpCtxId);
         
-        if (rsp.data.pdpAddressList.pdpAddress && 
+        if (rsp.data.pdpAddressList.pdpAddress != NULL && 
             rsp.data.pdpAddressList.pdpAddress[0] != '\0') {
             ESP_LOGI(TAG, "Primary IP Address: %s", rsp.data.pdpAddressList.pdpAddress);
         } else {
             ESP_LOGI(TAG, "Primary IP Address: None");
         }
         
-        if (rsp.data.pdpAddressList.pdpAddress2 && 
+        if (rsp.data.pdpAddressList.pdpAddress2 != NULL && 
             rsp.data.pdpAddressList.pdpAddress2[0] != '\0') {
             ESP_LOGI(TAG, "Secondary IP Address: %s", rsp.data.pdpAddressList.pdpAddress2);
         }
@@ -418,7 +419,7 @@ extern "C" void app_main(void)
     }
     
     // Create monitoring task
-    xTaskCreate(
+    BaseType_t taskCreated = xTaskCreate(
         monitor_task,
         "monitor_task",
         4096,
@@ -426,6 +427,10 @@ extern "C" void app_main(void)
         5,
         NULL
     );
+    
+    if (taskCreated != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create monitoring task");
+    }
     
     // Main task can do other work here
     while (1) {
