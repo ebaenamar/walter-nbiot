@@ -54,7 +54,7 @@ static bool wait_for_network_registration(uint32_t timeout_ms)
     WalterModemNetworkRegState regState = WALTER_MODEM_NETWORK_REG_NOT_SEARCHING;
     
     while (elapsed < timeout_ms) {
-        regState = WalterModem::getNetworkRegState();
+        regState = modem.getNetworkRegState();
         
         if (regState == WALTER_MODEM_NETWORK_REG_REGISTERED_HOME || 
             regState == WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING) {
@@ -78,7 +78,7 @@ static void get_signal_info(void)
 {
     WalterModemRsp rsp = {};
     
-    if (WalterModem::getSignalQuality(&rsp)) {
+    if (modem.getSignalQuality(&rsp)) {
         ESP_LOGI(TAG, "Signal quality - RSSI: %d dBm, RSRP: %d dBm", 
                  rsp.data.signalQuality.rssi, 
                  rsp.data.signalQuality.rsrp);
@@ -87,6 +87,9 @@ static void get_signal_info(void)
     }
 }
 
+
+// Global modem instance
+static WalterModem modem;
 
 /**
  * Main NB-IoT connection function
@@ -111,7 +114,7 @@ static bool connect_nbiot(void)
     
     // Step 2: Check communication
     ESP_LOGI(TAG, "[2/10] Checking modem communication...");
-    if (!WalterModem::checkComm()) {
+    if (!modem.checkComm()) {
         ESP_LOGE(TAG, "Cannot communicate with modem");
         return false;
     }
@@ -127,7 +130,7 @@ static bool connect_nbiot(void)
     // Step 3: Get modem identity
     ESP_LOGI(TAG, "[3/10] Getting modem identity...");
     rsp = {};
-    if (WalterModem::getIdentity(&rsp)) {
+    if (modem.getIdentity(&rsp)) {
         ESP_LOGI(TAG, "Modem info: %s", rsp.data.identity);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -135,7 +138,7 @@ static bool connect_nbiot(void)
     // Step 3.5: Check current operational state
     ESP_LOGI(TAG, "[3.5/10] Checking current operational state...");
     rsp = {};
-    if (WalterModem::getOpState(&rsp)) {
+    if (modem.getOpState(&rsp)) {
         ESP_LOGI(TAG, "Current operational state: %d", rsp.data.opState);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -143,7 +146,7 @@ static bool connect_nbiot(void)
     // Step 3.6: Check current RAT
     ESP_LOGI(TAG, "[3.6/10] Checking current RAT...");
     rsp = {};
-    if (WalterModem::getRAT(&rsp)) {
+    if (modem.getRAT(&rsp)) {
         ESP_LOGI(TAG, "Current RAT: %d (0=CAT-M1, 1=NB-IoT, 2=GSM)", rsp.data.rat);
     } else {
         ESP_LOGW(TAG, "Could not get current RAT");
@@ -153,14 +156,14 @@ static bool connect_nbiot(void)
     // Step 3.7: Check radio bands
     ESP_LOGI(TAG, "[3.7/10] Checking radio bands...");
     rsp = {};
-    if (WalterModem::getRadioBands(&rsp)) {
+    if (modem.getRadioBands(&rsp)) {
         ESP_LOGI(TAG, "Radio bands configured");
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Step 4: Set operational state to MINIMUM (required before changing RAT)
     ESP_LOGI(TAG, "[4/10] Setting operational state to MINIMUM...");
-    if (!WalterModem::setOpState(WALTER_MODEM_OPSTATE_MINIMUM)) {
+    if (!modem.setOpState(WALTER_MODEM_OPSTATE_MINIMUM)) {
         ESP_LOGE(TAG, "Failed to set operational state to MINIMUM");
         return false;
     }
@@ -191,12 +194,12 @@ static bool connect_nbiot(void)
     } else {
         // Normal mode (less verbose)
         rsp = {};
-        if (!WalterModem::setRAT(WALTER_MODEM_RAT_NBIOT, &rsp)) {
+        if (!modem.setRAT(WALTER_MODEM_RAT_NBIOT, &rsp)) {
             ESP_LOGE(TAG, "Failed to set RAT to NB-IoT (error code: %d)", rsp.result);
             
             ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
             rsp = {};
-            if (!WalterModem::setRAT(WALTER_MODEM_RAT_LTEM, &rsp)) {
+            if (!modem.setRAT(WALTER_MODEM_RAT_LTEM, &rsp)) {
                 ESP_LOGE(TAG, "Failed to set RAT to LTE-M (error code: %d)", rsp.result);
                 ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
             } else {
@@ -210,14 +213,14 @@ static bool connect_nbiot(void)
     // Verify final RAT setting
     vTaskDelay(pdMS_TO_TICKS(1000));
     rsp = {};
-    if (WalterModem::getRAT(&rsp)) {
+    if (modem.getRAT(&rsp)) {
         ESP_LOGI(TAG, "Final RAT configuration: %d", rsp.data.rat);
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     
     // Step 5.5: Set operational state back to FULL
     ESP_LOGI(TAG, "[5.5/10] Setting operational state to FULL...");
-    if (!WalterModem::setOpState(WALTER_MODEM_OPSTATE_FULL)) {
+    if (!modem.setOpState(WALTER_MODEM_OPSTATE_FULL)) {
         ESP_LOGE(TAG, "Failed to set operational state to FULL");
         return false;
     }
@@ -226,7 +229,7 @@ static bool connect_nbiot(void)
     
     // Step 6: Unlock SIM card
     ESP_LOGI(TAG, "[6/10] Unlocking SIM card...");
-    if (!WalterModem::unlockSIM(SIM_PIN)) {
+    if (!modem.unlockSIM(SIM_PIN)) {
         ESP_LOGE(TAG, "Failed to unlock SIM");
         ESP_LOGE(TAG, "Check SIM card and PIN code");
         return false;
@@ -237,14 +240,14 @@ static bool connect_nbiot(void)
     // Step 6.5: Check SIM state
     ESP_LOGI(TAG, "[6.5/10] Checking SIM state...");
     rsp = {};
-    if (WalterModem::getSIMState(&rsp)) {
+    if (modem.getSIMState(&rsp)) {
         ESP_LOGI(TAG, "SIM state: %d", rsp.data.simState);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Step 7: Set network selection mode
     ESP_LOGI(TAG, "[7/10] Setting network selection to automatic...");
-    if (!WalterModem::setNetworkSelectionMode(WALTER_MODEM_NETWORK_SEL_MODE_AUTOMATIC)) {
+    if (!modem.setNetworkSelectionMode(WALTER_MODEM_NETWORK_SEL_MODE_AUTOMATIC)) {
         ESP_LOGE(TAG, "Failed to set network selection mode");
         return false;
     }
@@ -268,12 +271,12 @@ static bool connect_nbiot(void)
         }
         
         rsp = {};
-        if (WalterModem::getRAT(&rsp)) {
+        if (modem.getRAT(&rsp)) {
             ESP_LOGE(TAG, "  Current RAT: %d", rsp.data.rat);
         }
         
         rsp = {};
-        if (WalterModem::getSIMState(&rsp)) {
+        if (modem.getSIMState(&rsp)) {
             ESP_LOGE(TAG, "  SIM state: %d", rsp.data.simState);
         }
         
@@ -296,7 +299,7 @@ static bool connect_nbiot(void)
     // Get cell information
     ESP_LOGI(TAG, "Getting cell information...");
     rsp = {};
-    if (WalterModem::getCellInformation(&rsp)) {
+    if (modem.getCellInformation(&rsp)) {
         ESP_LOGI(TAG, "Connected to network");
     }
     
@@ -304,7 +307,7 @@ static bool connect_nbiot(void)
     
     // Step 9: Define PDP context
     ESP_LOGI(TAG, "[9/10] Defining PDP context...");
-    if (!WalterModem::definePDPContext(PDP_CONTEXT_ID, CELLULAR_APN)) {
+    if (!modem.definePDPContext(PDP_CONTEXT_ID, CELLULAR_APN)) {
         ESP_LOGE(TAG, "Failed to define PDP context");
         ESP_LOGE(TAG, "Check APN configuration");
         return false;
@@ -315,7 +318,7 @@ static bool connect_nbiot(void)
     // Step 9.5: Set authentication parameters if needed
     if (strlen(CELLULAR_APN_USER) > 0) {
         ESP_LOGI(TAG, "[9.5/10] Setting PDP authentication...");
-        if (!WalterModem::setPDPAuthParams(
+        if (!modem.setPDPAuthParams(
                 WALTER_MODEM_PDP_AUTH_PROTO_PAP, 
                 CELLULAR_APN_USER, 
                 CELLULAR_APN_PASS)) {
@@ -328,7 +331,7 @@ static bool connect_nbiot(void)
     
     // Step 9.6: Activate PDP context
     ESP_LOGI(TAG, "[9.6/10] Activating PDP context...");
-    if (!WalterModem::setPDPContextActive(true)) {
+    if (!modem.setPDPContextActive(true)) {
         ESP_LOGE(TAG, "Failed to activate PDP context");
         return false;
     }
@@ -337,7 +340,7 @@ static bool connect_nbiot(void)
     
     // Step 10: Attach to network
     ESP_LOGI(TAG, "[10/10] Attaching to packet domain...");
-    if (!WalterModem::setNetworkAttachmentState(true)) {
+    if (!modem.setNetworkAttachmentState(true)) {
         ESP_LOGE(TAG, "Failed to attach to network");
         return false;
     }
@@ -349,7 +352,7 @@ static bool connect_nbiot(void)
     // Get PDP address
     ESP_LOGI(TAG, "Getting IP address...");
     rsp = {};
-    if (WalterModem::getPDPAddress(&rsp)) {
+    if (modem.getPDPAddress(&rsp)) {
         ESP_LOGI(TAG, "PDP Context ID: %d", rsp.data.pdpAddressList.pdpCtxId);
         
         if (rsp.data.pdpAddressList.pdpAddress != NULL && 
@@ -390,7 +393,7 @@ static void monitor_task(void *pvParameters)
         ESP_LOGI(TAG, "--- Status Check ---");
         
         // Check network registration
-        WalterModemNetworkRegState regState = WalterModem::getNetworkRegState();
+        WalterModemNetworkRegState regState = modem.getNetworkRegState();
         ESP_LOGI(TAG, "Network registration: %s", 
             regState == WALTER_MODEM_NETWORK_REG_NOT_SEARCHING ? "Not searching" :
             regState == WALTER_MODEM_NETWORK_REG_REGISTERED_HOME ? "Registered (Home)" :

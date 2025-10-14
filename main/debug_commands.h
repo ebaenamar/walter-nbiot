@@ -13,6 +13,9 @@
 #include <freertos/task.h>
 #include <WalterModem.h>
 
+// External reference to modem instance (defined in main.cpp)
+extern WalterModem modem;
+
 static const char *DEBUG_TAG = "walter_debug";
 
 /**
@@ -26,7 +29,7 @@ static void send_debug_command(const char* cmd, const char* description) {
     
     ESP_LOGI(DEBUG_TAG, "Sending: %s (%s)", cmd, description);
     WalterModemRsp rsp = {};
-    if (WalterModem::sendCmd(cmd, NULL, &rsp)) {
+    if (modem.sendCmd(cmd, NULL, &rsp)) {
         ESP_LOGI(DEBUG_TAG, "  Response OK");
     } else {
         ESP_LOGE(DEBUG_TAG, "  Response FAILED");
@@ -85,7 +88,7 @@ static void check_rat_support(void) {
     send_debug_command("AT+URAT=?", "Supported RAT values");
     
     // Check current RAT
-    if (WalterModem::getRAT(&rsp)) {
+    if (modem.getRAT(&rsp)) {
         const char* rat_name = "Unknown";
         switch(rsp.data.rat) {
             case WALTER_MODEM_RAT_LTEM:
@@ -112,7 +115,7 @@ static void check_network_coverage(void) {
     
     // Signal quality
     WalterModemRsp rsp = {};
-    if (WalterModem::getSignalQuality(&rsp)) {
+    if (modem.getSignalQuality(&rsp)) {
         ESP_LOGI(DEBUG_TAG, "  RSSI: %d dBm", rsp.data.signalQuality.rssi);
         ESP_LOGI(DEBUG_TAG, "  RSRP: %d dBm", rsp.data.signalQuality.rsrp);
         ESP_LOGI(DEBUG_TAG, "  RSRQ: %d dB", rsp.data.signalQuality.rsrq);
@@ -135,7 +138,7 @@ static void check_network_coverage(void) {
     }
     
     // Network registration state
-    WalterModemNetworkRegState regState = WalterModem::getNetworkRegState();
+    WalterModemNetworkRegState regState = modem.getNetworkRegState();
     const char* reg_name = "Unknown";
     switch(regState) {
         case WALTER_MODEM_NETWORK_REG_NOT_SEARCHING:
@@ -168,13 +171,13 @@ static bool debug_set_rat(WalterModemRat rat) {
     
     // Check current state
     WalterModemRsp rsp = {};
-    if (WalterModem::getOpState(&rsp)) {
+    if (modem.getOpState(&rsp)) {
         ESP_LOGI(DEBUG_TAG, "  Current op state: %d", rsp.data.opState);
     }
     
     // Try to set RAT
     rsp = {};
-    bool result = WalterModem::setRAT(rat, &rsp);
+    bool result = modem.setRAT(rat, &rsp);
     
     if (result) {
         ESP_LOGI(DEBUG_TAG, "  RAT set successfully");
@@ -185,7 +188,7 @@ static bool debug_set_rat(WalterModemRat rat) {
     // Verify what was actually set
     vTaskDelay(pdMS_TO_TICKS(1000));
     rsp = {};
-    if (WalterModem::getRAT(&rsp)) {
+    if (modem.getRAT(&rsp)) {
         ESP_LOGI(DEBUG_TAG, "  Verified RAT: %d", rsp.data.rat);
     }
     
