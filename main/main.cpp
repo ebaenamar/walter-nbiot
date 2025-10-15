@@ -18,6 +18,7 @@
 #include <string.h>
 #include <WalterModem.h>
 #include "debug_commands.h"
+#include "http_json_example.h"
 
 // Logging tag
 static const char *TAG = "walter_nbiot";
@@ -377,10 +378,46 @@ static bool connect_nbiot(void)
     ESP_LOGI(TAG, "==================================================");
     ESP_LOGI(TAG, "CONNECTION SUCCESSFUL!");
     ESP_LOGI(TAG, "==================================================");
-    ESP_LOGI(TAG, "You can now use the modem for data transmission.");
-    ESP_LOGI(TAG, "Check the WalterModem library examples for HTTP, MQTT, and Socket usage.");
+    ESP_LOGI(TAG, "Modem is ready for data transmission");
     
     return true;
+}
+
+
+/**
+ * Test JSON transmission
+ */
+static void test_json_transmission(void)
+{
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "==================================================");
+    ESP_LOGI(TAG, "Testing JSON Transmission");
+    ESP_LOGI(TAG, "==================================================");
+    
+    // Wait a bit before sending
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
+    // Example 1: Send to httpbin.org (test server)
+    ESP_LOGI(TAG, "Example 1: Sending telemetry to test server...");
+    if (send_telemetry_example()) {
+        ESP_LOGI(TAG, "✓ Telemetry sent successfully!");
+    } else {
+        ESP_LOGE(TAG, "✗ Failed to send telemetry");
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    // Example 2: Send sensor data
+    ESP_LOGI(TAG, "Example 2: Sending sensor data...");
+    if (send_sensor_data_example("http://httpbin.org/post")) {
+        ESP_LOGI(TAG, "✓ Sensor data sent successfully!");
+    } else {
+        ESP_LOGE(TAG, "✗ Failed to send sensor data");
+    }
+    
+    ESP_LOGI(TAG, "==================================================");
+    ESP_LOGI(TAG, "JSON Transmission Test Complete");
+    ESP_LOGI(TAG, "==================================================");
 }
 
 
@@ -425,6 +462,9 @@ extern "C" void app_main(void)
         return;
     }
     
+    // Test JSON transmission
+    test_json_transmission();
+    
     // Create monitoring task
     BaseType_t taskCreated = xTaskCreate(
         monitor_task,
@@ -439,8 +479,17 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "Failed to create monitoring task");
     }
     
-    // Main task can do other work here
+    // Main loop - send data every 60 seconds
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(60000)); // Wait 60 seconds
+        
+        ESP_LOGI(TAG, "Sending periodic data...");
+        
+        // Create and send custom JSON
+        char* json = create_custom_json("walter-001", 24.5, 62.0);
+        if (json != NULL) {
+            send_json_http("http://httpbin.org/post", json);
+            cJSON_free(json);
+        }
     }
 }
