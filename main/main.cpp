@@ -79,9 +79,9 @@ static void get_signal_info(void)
     WalterModemRsp rsp = {};
     
     if (modem.getSignalQuality(&rsp)) {
-        ESP_LOGI(TAG, "Signal quality - RSSI: %d dBm, RSRP: %d dBm", 
-                 rsp.data.signalQuality.rssi, 
-                 rsp.data.signalQuality.rsrp);
+        ESP_LOGI(TAG, "Signal quality - RSRP: %d dBm, RSRQ: %d dB", 
+                 rsp.data.signalQuality.rsrp, 
+                 rsp.data.signalQuality.rsrq);
     } else {
         ESP_LOGW(TAG, "Could not retrieve signal quality");
     }
@@ -90,6 +90,8 @@ static void get_signal_info(void)
 
 // Global modem instance (not static so it can be used in debug_commands.h)
 WalterModem modem;
+
+// Forward declarations removed - functions are defined in debug_commands.h
 
 /**
  * Main NB-IoT connection function
@@ -131,7 +133,9 @@ static bool connect_nbiot(void)
     ESP_LOGI(TAG, "[3/10] Getting modem identity...");
     rsp = {};
     if (modem.getIdentity(&rsp)) {
-        ESP_LOGI(TAG, "Modem info: %s", rsp.data.identity);
+        ESP_LOGI(TAG, "Modem IMEI: %s", rsp.data.identity.imei);
+        ESP_LOGI(TAG, "Modem IMEISV: %s", rsp.data.identity.imeisv);
+        ESP_LOGI(TAG, "Modem SVN: %s", rsp.data.identity.svn);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
@@ -299,7 +303,7 @@ static bool connect_nbiot(void)
     // Get cell information
     ESP_LOGI(TAG, "Getting cell information...");
     rsp = {};
-    if (modem.getCellInformation(&rsp)) {
+    if (modem.getCellInformation(WALTER_MODEM_SQNMONI_REPORTS_SERVING_CELL, &rsp)) {
         ESP_LOGI(TAG, "Connected to network");
     }
     

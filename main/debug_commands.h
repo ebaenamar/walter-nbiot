@@ -97,8 +97,12 @@ static void check_rat_support(void) {
             case WALTER_MODEM_RAT_NBIOT:
                 rat_name = "NB-IoT";
                 break;
-            case WALTER_MODEM_RAT_GSM:
-                rat_name = "GSM";
+            case WALTER_MODEM_RAT_AUTO:
+                rat_name = "Auto";
+                break;
+            case WALTER_MODEM_RAT_UNKNOWN:
+            default:
+                rat_name = "Unknown";
                 break;
         }
         ESP_LOGI(DEBUG_TAG, "Current RAT: %d (%s)", rsp.data.rat, rat_name);
@@ -116,10 +120,8 @@ static void check_network_coverage(void) {
     // Signal quality
     WalterModemRsp rsp = {};
     if (modem.getSignalQuality(&rsp)) {
-        ESP_LOGI(DEBUG_TAG, "  RSSI: %d dBm", rsp.data.signalQuality.rssi);
         ESP_LOGI(DEBUG_TAG, "  RSRP: %d dBm", rsp.data.signalQuality.rsrp);
         ESP_LOGI(DEBUG_TAG, "  RSRQ: %d dB", rsp.data.signalQuality.rsrq);
-        ESP_LOGI(DEBUG_TAG, "  SNR: %d dB", rsp.data.signalQuality.snr);
         
         // Interpret signal quality
         if (rsp.data.signalQuality.rsrp > -80) {
@@ -156,6 +158,9 @@ static void check_network_coverage(void) {
         case WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING:
             reg_name = "Registered (Roaming)";
             break;
+        default:
+            reg_name = "Other";
+            break;
     }
     ESP_LOGI(DEBUG_TAG, "  Registration: %s (%d)", reg_name, regState);
 }
@@ -163,7 +168,7 @@ static void check_network_coverage(void) {
 /**
  * Try to manually set RAT with detailed logging
  */
-static bool debug_set_rat(WalterModemRat rat) {
+static bool debug_set_rat(WalterModemRAT rat) {
     const char* rat_name = (rat == WALTER_MODEM_RAT_NBIOT) ? "NB-IoT" : 
                            (rat == WALTER_MODEM_RAT_LTEM) ? "LTE-M" : "Unknown";
     
