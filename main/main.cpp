@@ -88,8 +88,8 @@ static void get_signal_info(void)
 }
 
 
-// Global modem instance
-static WalterModem modem;
+// Global modem instance (not static so it can be used in debug_commands.h)
+WalterModem modem;
 
 /**
  * Main NB-IoT connection function
