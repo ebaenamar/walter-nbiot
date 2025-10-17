@@ -19,6 +19,7 @@
 #include <WalterModem.h>
 #include "debug_commands.h"
 #include "http_json_example.h"
+#include "modem_diagnostics.h"
 
 // Logging tag
 static const char *TAG = "walter_nbiot";
@@ -29,6 +30,9 @@ static const char *TAG = "walter_nbiot";
 
 // Enable JSON test transmission (disable to save memory)
 #define ENABLE_JSON_TEST false
+
+// Enable complete diagnostics (shows all AT commands and responses)
+#define ENABLE_FULL_DIAGNOSTICS true
 
 // Network configuration - Soracom
 #define CELLULAR_APN "soracom.io"          // Soracom APN
@@ -84,9 +88,29 @@ static void get_signal_info(void)
     WalterModemRsp rsp = {};
     
     if (modem.getSignalQuality(&rsp)) {
-        ESP_LOGI(TAG, "Signal quality - RSRP: %d dBm, RSRQ: %d dB", 
-                 rsp.data.signalQuality.rsrp, 
-                 rsp.data.signalQuality.rsrq);
+        // RSRP and RSRQ should be negative values
+        int16_t rsrp = rsp.data.signalQuality.rsrp;
+        int16_t rsrq = rsp.data.signalQuality.rsrq;
+        
+        // Check if values are valid (should be negative)
+        if (rsrp > 0 || rsrp < -150 || rsrq > 0 || rsrq < -50) {
+            ESP_LOGW(TAG, "Invalid signal values - RSRP: %d, RSRQ: %d (modem may not be ready)", rsrp, rsrq);
+        } else {
+            ESP_LOGI(TAG, "Signal quality - RSRP: %d dBm, RSRQ: %d dB", rsrp, rsrq);
+            
+            // Interpret signal quality
+            if (rsrp > -80) {
+                ESP_LOGI(TAG, "  Signal: EXCELLENT");
+            } else if (rsrp > -90) {
+                ESP_LOGI(TAG, "  Signal: GOOD");
+            } else if (rsrp > -100) {
+                ESP_LOGI(TAG, "  Signal: FAIR");
+            } else if (rsrp > -110) {
+                ESP_LOGI(TAG, "  Signal: POOR");
+            } else {
+                ESP_LOGW(TAG, "  Signal: VERY POOR (may not connect)");
+            }
+        }
     } else {
         ESP_LOGW(TAG, "Could not retrieve signal quality");
     }
@@ -125,9 +149,15 @@ static bool connect_nbiot(void)
         ESP_LOGE(TAG, "Cannot communicate with modem");
         return false;
     }
-    ESP_LOGI(TAG, "OK: Communication established");
+    ESP_LOGI(TAG, "Modem initialized successfully.");
     vTaskDelay(pdMS_TO_TICKS(500));
-    
+
+    // Run complete diagnostics if enabled
+    #if ENABLE_FULL_DIAGNOSTICS
+    run_complete_diagnostics();
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    #endif
+
     // Run full diagnostics if debug mode is enabled
     if (DEBUG_MODE) {
         run_modem_diagnostics();
@@ -170,6 +200,16 @@ static bool connect_nbiot(void)
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     
+    // Step 7: Verify current RAT before setting
+    ESP_LOGI(TAG, "[7/10] Checking current RAT...");
+    rsp = {};
+    if (modem.getRAT(&rsp)) {
+        ESP_LOGI(TAG, "Current RAT before change: %d (%s)", rsp.data.rat,
+                 rsp.data.rat == WALTER_MODEM_RAT_NBIOT ? "NB-IoT" :
+                 rsp.data.rat == WALTER_MODEM_RAT_LTEM ? "LTE-M" :
+                 rsp.data.rat == WALTER_MODEM_RAT_AUTO ? "Auto" : "Unknown");
+    }
+    
     // Step 4: Set operational state to MINIMUM (required before changing RAT)
     ESP_LOGI(TAG, "[4/10] Setting operational state to MINIMUM...");
     if (!modem.setOpState(WALTER_MODEM_OPSTATE_MINIMUM)) {
@@ -186,44 +226,35 @@ static bool connect_nbiot(void)
         check_rat_support();
     }
     
-    // Use debug function for detailed RAT setting
-    if (DEBUG_MODE) {
-        if (!debug_set_rat(WALTER_MODEM_RAT_NBIOT)) {
-            ESP_LOGE(TAG, "Failed to set RAT to NB-IoT");
-            ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
-            if (!debug_set_rat(WALTER_MODEM_RAT_LTEM)) {
-                ESP_LOGE(TAG, "Failed to set RAT to LTE-M");
-                ESP_LOGW(TAG, "Continuing with current RAT setting");
-            } else {
-                ESP_LOGI(TAG, "OK: RAT set to LTE-M");
-            }
+    // Try NB-IoT first
+    rsp = {};
+    if (!modem.setRAT(WALTER_MODEM_RAT_NBIOT, &rsp)) {
+        ESP_LOGE(TAG, "Failed to set RAT to NB-IoT (error code: %d)", rsp.result);
+        
+        ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
+        rsp = {};
+        if (!modem.setRAT(WALTER_MODEM_RAT_LTEM, &rsp)) {
+            ESP_LOGE(TAG, "Failed to set RAT to LTE-M (error code: %d)", rsp.result);
+            ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
         } else {
-            ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
+            ESP_LOGI(TAG, "OK: RAT set to LTE-M");
         }
     } else {
-        // Normal mode (less verbose)
-        rsp = {};
-        if (!modem.setRAT(WALTER_MODEM_RAT_NBIOT, &rsp)) {
-            ESP_LOGE(TAG, "Failed to set RAT to NB-IoT (error code: %d)", rsp.result);
-            
-            ESP_LOGI(TAG, "Trying LTE-M (CAT-M1) as fallback...");
-            rsp = {};
-            if (!modem.setRAT(WALTER_MODEM_RAT_LTEM, &rsp)) {
-                ESP_LOGE(TAG, "Failed to set RAT to LTE-M (error code: %d)", rsp.result);
-                ESP_LOGW(TAG, "Continuing anyway - modem may use default RAT");
-            } else {
-                ESP_LOGI(TAG, "OK: RAT set to LTE-M");
-            }
-        } else {
-            ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
-        }
+        ESP_LOGI(TAG, "OK: RAT set to NB-IoT");
     }
     
     // Verify final RAT setting
     vTaskDelay(pdMS_TO_TICKS(1000));
     rsp = {};
     if (modem.getRAT(&rsp)) {
-        ESP_LOGI(TAG, "Final RAT configuration: %d", rsp.data.rat);
+        ESP_LOGI(TAG, "Final RAT configuration: %d (%s)", rsp.data.rat,
+                 rsp.data.rat == WALTER_MODEM_RAT_NBIOT ? "NB-IoT" :
+                 rsp.data.rat == WALTER_MODEM_RAT_LTEM ? "LTE-M" :
+                 rsp.data.rat == WALTER_MODEM_RAT_AUTO ? "Auto" : "UNKNOWN/ERROR");
+                 
+        if (rsp.data.rat != WALTER_MODEM_RAT_NBIOT && rsp.data.rat != WALTER_MODEM_RAT_LTEM) {
+            ESP_LOGW(TAG, "WARNING: RAT is %d - not NB-IoT(8) or LTE-M(9)!", rsp.data.rat);
+        }
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     
@@ -288,12 +319,18 @@ static bool connect_nbiot(void)
         
         rsp = {};
         if (modem.getRAT(&rsp)) {
-            ESP_LOGE(TAG, "  Current RAT: %d", rsp.data.rat);
+            ESP_LOGE(TAG, "  Current RAT: %d (%s)", rsp.data.rat,
+                 rsp.data.rat == WALTER_MODEM_RAT_NBIOT ? "NB-IoT" :
+                 rsp.data.rat == WALTER_MODEM_RAT_LTEM ? "LTE-M" :
+                 rsp.data.rat == WALTER_MODEM_RAT_AUTO ? "Auto" : "Unknown/Wrong");
         }
         
         rsp = {};
         if (modem.getSIMState(&rsp)) {
-            ESP_LOGE(TAG, "  SIM state: %d", rsp.data.simState);
+            ESP_LOGE(TAG, "  SIM state: %d (%s)", rsp.data.simState,
+                     rsp.data.simState == WALTER_MODEM_SIM_STATE_READY ? "Ready" :
+                     rsp.data.simState == WALTER_MODEM_SIM_STATE_PIN_REQUIRED ? "PIN Required" :
+                     rsp.data.simState == WALTER_MODEM_SIM_STATE_PUK_REQUIRED ? "PUK Required" : "Unknown");
         }
         
         get_signal_info();
