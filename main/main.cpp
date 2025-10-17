@@ -20,6 +20,7 @@
 #include "debug_commands.h"
 #include "http_json_example.h"
 #include "modem_diagnostics.h"
+#include "at_commands.h"
 
 // Logging tag
 static const char *TAG = "walter_nbiot";
@@ -33,6 +34,9 @@ static const char *TAG = "walter_nbiot";
 
 // Enable complete diagnostics (shows all AT commands and responses)
 #define ENABLE_FULL_DIAGNOSTICS true
+
+// Enable AT command debugging (direct AT commands to modem)
+#define ENABLE_AT_COMMANDS false
 
 // Network configuration - Soracom
 #define CELLULAR_APN "soracom.io"          // Soracom APN
@@ -155,6 +159,17 @@ static bool connect_nbiot(void)
     // Run complete diagnostics if enabled
     #if ENABLE_FULL_DIAGNOSTICS
     run_complete_diagnostics();
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    #endif
+
+    // Run AT command diagnostics if enabled
+    #if ENABLE_AT_COMMANDS
+    ESP_LOGI(TAG, "Running AT command diagnostics...");
+    run_at_diagnostics();
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
+    ESP_LOGI(TAG, "Attempting RAT configuration via AT commands...");
+    configure_rat_with_at_commands();
     vTaskDelay(pdMS_TO_TICKS(2000));
     #endif
 
