@@ -24,7 +24,11 @@
 static const char *TAG = "walter_nbiot";
 
 // Enable debug mode (set to false to disable verbose debugging)
-#define DEBUG_MODE true
+// WARNING: Debug mode uses a lot of stack memory and may cause overflow
+#define DEBUG_MODE false
+
+// Enable JSON test transmission (disable to save memory)
+#define ENABLE_JSON_TEST false
 
 // Network configuration - Soracom
 #define CELLULAR_APN "soracom.io"          // Soracom APN
@@ -33,9 +37,9 @@ static const char *TAG = "walter_nbiot";
 #define SIM_PIN NULL                       // SIM PIN code (NULL if no PIN)
 
 // Connection timeouts in milliseconds
-#define NETWORK_TIMEOUT_MS 120000          // 2 minutes
+#define NETWORK_TIMEOUT_MS 180000          // 3 minutes (increased for NB-IoT)
 #define ATTACH_TIMEOUT_MS 60000            // 1 minute
-#define CHECK_INTERVAL_MS 2000             // 2 seconds
+#define CHECK_INTERVAL_MS 5000             // 5 seconds (reduced frequency)
 
 // UART configuration for modem
 #define MODEM_UART_NUM UART_NUM_1
@@ -232,14 +236,21 @@ static bool connect_nbiot(void)
     ESP_LOGI(TAG, "OK: Operational state set to FULL");
     vTaskDelay(pdMS_TO_TICKS(2000));
     
-    // Step 6: Unlock SIM card
-    ESP_LOGI(TAG, "[6/10] Unlocking SIM card...");
-    if (!modem.unlockSIM(SIM_PIN)) {
-        ESP_LOGE(TAG, "Failed to unlock SIM");
-        ESP_LOGE(TAG, "Check SIM card and PIN code");
-        return false;
+    // Step 6: Unlock SIM card (skip if no PIN)
+    #if SIM_PIN != NULL
+    if (strlen(SIM_PIN) > 0) {
+        ESP_LOGI(TAG, "[6/10] Unlocking SIM card...");
+        if (!modem.unlockSIM(SIM_PIN)) {
+            ESP_LOGE(TAG, "Failed to unlock SIM");
+            ESP_LOGE(TAG, "Check SIM card and PIN code");
+            return false;
+        }
+        ESP_LOGI(TAG, "OK: SIM unlocked");
+    } else
+    #endif
+    {
+        ESP_LOGI(TAG, "[6/10] No SIM PIN required, skipping unlock");
     }
-    ESP_LOGI(TAG, "OK: SIM unlocked");
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Step 6.5: Check SIM state
@@ -387,7 +398,7 @@ static bool connect_nbiot(void)
 /**
  * Test JSON transmission
  */
-static void test_json_transmission(void)
+__attribute__((unused)) static void test_json_transmission(void)
 {
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "==================================================");
@@ -422,31 +433,23 @@ static void test_json_transmission(void)
 
 
 /**
- * Monitor connection status task
+ * Monitor connection status task (minimal version to prevent stack overflow)
  */
 static void monitor_task(void *pvParameters)
 {
-    const TickType_t xDelay = pdMS_TO_TICKS(30000); // 30 seconds
+    const TickType_t xDelay = pdMS_TO_TICKS(60000); // Check every 60 seconds
     
     while (1) {
         vTaskDelay(xDelay);
         
-        ESP_LOGI(TAG, "--- Status Check ---");
-        
-        // Check network registration
+        // Minimal status check - just verify we're still registered
         WalterModemNetworkRegState regState = modem.getNetworkRegState();
-        ESP_LOGI(TAG, "Network registration: %s", 
-            regState == WALTER_MODEM_NETWORK_REG_NOT_SEARCHING ? "Not searching" :
-            regState == WALTER_MODEM_NETWORK_REG_REGISTERED_HOME ? "Registered (Home)" :
-            regState == WALTER_MODEM_NETWORK_REG_SEARCHING ? "Searching..." :
-            regState == WALTER_MODEM_NETWORK_REG_DENIED ? "Denied" :
-            regState == WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING ? "Registered (Roaming)" :
-            "Unknown");
         
-        // Check signal quality
-        get_signal_info();
-        
-        ESP_LOGI(TAG, "-------------------");
+        if (regState != WALTER_MODEM_NETWORK_REG_REGISTERED_HOME && 
+            regState != WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING) {
+            // Only log if there's a problem
+            ESP_LOGW(TAG, "Network lost: %d", regState);
+        }
     }
 }
 
@@ -462,16 +465,20 @@ extern "C" void app_main(void)
         return;
     }
     
-    // Test JSON transmission
+    // Test JSON transmission (optional - can be disabled to save memory)
+    #if ENABLE_JSON_TEST
     test_json_transmission();
+    #else
+    ESP_LOGI(TAG, "JSON test disabled (ENABLE_JSON_TEST=false)");
+    #endif
     
-    // Create monitoring task
+    // Create monitoring task with minimal stack (optimized)
     BaseType_t taskCreated = xTaskCreate(
         monitor_task,
-        "monitor_task",
-        4096,
+        "monitor",       // Shorter name
+        2048,            // Minimal stack - just checks network state
         NULL,
-        5,
+        1,               // Lower priority
         NULL
     );
     
@@ -479,17 +486,18 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "Failed to create monitoring task");
     }
     
-    // Main loop - send data every 60 seconds
+    // Main loop - keep alive
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(60000)); // Wait 60 seconds
+        vTaskDelay(pdMS_TO_TICKS(10000)); // Just keep alive, don't spam
         
+        // Uncomment to send periodic data:
+        /*
         ESP_LOGI(TAG, "Sending periodic data...");
-        
-        // Create and send custom JSON
         char* json = create_custom_json("walter-001", 24.5, 62.0);
         if (json != NULL) {
             send_json_http("http://httpbin.org/post", json);
             cJSON_free(json);
         }
+        */
     }
 }
