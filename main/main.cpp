@@ -472,13 +472,13 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "JSON test disabled (ENABLE_JSON_TEST=false)");
     #endif
     
-    // Create monitoring task with minimal stack (optimized)
+    // Create monitoring task with adequate stack
     BaseType_t taskCreated = xTaskCreate(
         monitor_task,
-        "monitor",       // Shorter name
-        2048,            // Minimal stack - just checks network state
+        "monitor",
+        4096,            // Increased stack size
         NULL,
-        1,               // Lower priority
+        5,               // Normal priority
         NULL
     );
     
